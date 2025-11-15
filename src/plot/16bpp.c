@@ -21,7 +21,21 @@
 
 static inline uint16_t *get_xy_loc(nsfb_t *nsfb, int x, int y)
 {
-        return (void *)(nsfb->ptr + (y * nsfb->linelen) + (x << 1));
+        /* Transform coordinates for landscape orientation */
+        if (nsfb->orientation == 1) {
+                /* Landscape: rotate 90 degrees clockwise
+                 * Logical coords: x ∈ [0, 1872), y ∈ [0, 1404)
+                 * Physical coords: x ∈ [0, 1404), y ∈ [0, 1872)
+                 * Rotation: logical (x, y) -> physical (phys_width - 1 - y, x)
+                 * This maps logical top-left to physical top-right
+                 */
+                int phys_x = nsfb->phys_width - 1 - y;
+                int phys_y = x;
+                return (void *)(nsfb->ptr + (phys_y * nsfb->phys_linelen) + (phys_x << 1));
+        } else {
+                /* Portrait: direct mapping */
+                return (void *)(nsfb->ptr + (y * nsfb->linelen) + (x << 1));
+        }
 }
 
 static inline nsfb_colour_t pixel_to_colour(UNUSED nsfb_t *nsfb, uint16_t pixel)
@@ -61,6 +75,19 @@ static bool fill(nsfb_t *nsfb, nsfb_bbox_t *rect, nsfb_colour_t c)
         width = rect->x1 - rect->x0;
         height = rect->y1 - rect->y0;
 
+        /* Landscape mode: can't optimize row filling due to rotation */
+        if (nsfb->orientation == 1) {
+                int x, y;
+                for (y = rect->y0; y < rect->y1; y++) {
+                        for (x = rect->x0; x < rect->x1; x++) {
+                                pvid16 = get_xy_loc(nsfb, x, y);
+                                *pvid16 = ent16;
+                        }
+                }
+                return true;
+        }
+
+        /* Portrait mode: use optimized row filling */
         pvid16 = get_xy_loc(nsfb, rect->x0, rect->y0);
 
         if (((rect->x0 & 1) == 0) && ((width & 1) == 0)) {
@@ -105,6 +132,7 @@ static bool fill(nsfb_t *nsfb, nsfb_bbox_t *rect, nsfb_colour_t c)
                         pvid16 += llen;
                 }
         }
+
         return true;
 }
 

@@ -165,27 +165,53 @@ static int input_get_next_pen_event(input_state_t *input_state)
 			input_state->pen_state.distance = ev.value;
 			break;
 		case ABS_X:;
-			int translated_y = input_state->screen_height -
-					   (ev.value *
-					    input_state->screen_height /
-					    input_state->pen_state.max_x);
-			if (input_state->pen_state.position_y == translated_y) {
-				break;
+			int translated_y, translated_x;
+			if (input_state->orientation == SCREEN_ORIENTATION_LANDSCAPE) {
+				/* Landscape: ABS_X maps to screen X */
+				translated_x = (ev.value *
+						input_state->screen_width /
+						input_state->pen_state.max_x);
+				if (input_state->pen_state.position_x == translated_x) {
+					break;
+				}
+				input_state->pen_state.position_x = translated_x;
+				input_state->pen_state.position_changed = true;
+			} else {
+				/* Portrait: ABS_X maps to screen Y (inverted) */
+				translated_y = input_state->screen_height -
+					       (ev.value *
+						input_state->screen_height /
+						input_state->pen_state.max_x);
+				if (input_state->pen_state.position_y == translated_y) {
+					break;
+				}
+				input_state->pen_state.position_y = translated_y;
+				input_state->pen_state.position_changed = true;
 			}
-
-			input_state->pen_state.position_y = translated_y;
-			input_state->pen_state.position_changed = true;
 			break;
 		case ABS_Y:;
-			int translated_x = (ev.value *
-					    input_state->screen_width /
-					    input_state->pen_state.max_y);
-			if (input_state->pen_state.position_x == translated_x) {
-				break;
+			if (input_state->orientation == SCREEN_ORIENTATION_LANDSCAPE) {
+				/* Landscape: ABS_Y maps to screen Y (inverted) */
+				translated_y = input_state->screen_height -
+					       (ev.value *
+						input_state->screen_height /
+						input_state->pen_state.max_y);
+				if (input_state->pen_state.position_y == translated_y) {
+					break;
+				}
+				input_state->pen_state.position_y = translated_y;
+				input_state->pen_state.position_changed = true;
+			} else {
+				/* Portrait: ABS_Y maps to screen X */
+				translated_x = (ev.value *
+						input_state->screen_width /
+						input_state->pen_state.max_y);
+				if (input_state->pen_state.position_x == translated_x) {
+					break;
+				}
+				input_state->pen_state.position_x = translated_x;
+				input_state->pen_state.position_changed = true;
 			}
-
-			input_state->pen_state.position_x = translated_x;
-			input_state->pen_state.position_changed = true;
 			break;
 		case ABS_PRESSURE:
 			input_state->pen_state.pressure = ev.value;
@@ -340,46 +366,88 @@ static int input_get_next_multitouch_event(input_state_t *input_state)
 				.orientation = ev.value;
 			break;
 		case ABS_MT_POSITION_X:;
-			int translated_x =
-				(ev.value * input_state->screen_width /
-				 input_state->multitouch_state.max_x);
-			// invert x-axis only on RM1
-			if (input_state->model == RM1) {
-				translated_x = input_state->screen_width -
-					       translated_x;
+			int translated_coord;
+			if (input_state->orientation == SCREEN_ORIENTATION_LANDSCAPE) {
+				/* Landscape: ABS_MT_POSITION_X maps to screen X */
+				translated_coord =
+					(ev.value * input_state->screen_width /
+					 input_state->multitouch_state.max_x);
+				if (input_state->model == RM1) {
+					translated_coord = input_state->screen_width -
+							   translated_coord;
+				}
+			} else {
+				/* Portrait: ABS_MT_POSITION_X maps to screen Y (inverted) */
+				translated_coord = input_state->screen_height -
+						   (ev.value * input_state->screen_height /
+						    input_state->multitouch_state.max_x);
 			}
-			if (input_state->multitouch_state
-				    .slots[input_state->multitouch_state
-						   .current_slot]
-				    .position_x == translated_x) {
-				break;
+			if (input_state->orientation == SCREEN_ORIENTATION_LANDSCAPE) {
+				if (input_state->multitouch_state
+					    .slots[input_state->multitouch_state
+							   .current_slot]
+					    .position_x == translated_coord) {
+					break;
+				}
+				input_state->multitouch_state
+					.slots[input_state->multitouch_state
+						       .current_slot]
+					.position_x = translated_coord;
+			} else {
+				if (input_state->multitouch_state
+					    .slots[input_state->multitouch_state
+							   .current_slot]
+					    .position_y == translated_coord) {
+					break;
+				}
+				input_state->multitouch_state
+					.slots[input_state->multitouch_state
+						       .current_slot]
+					.position_y = translated_coord;
 			}
-
-			input_state->multitouch_state
-				.slots[input_state->multitouch_state
-					       .current_slot]
-				.position_x = translated_x;
 			input_state->multitouch_state
 				.slots[input_state->multitouch_state
 					       .current_slot]
 				.position_changed = true;
 			break;
 		case ABS_MT_POSITION_Y:;
-			int translated_y =
-				input_state->screen_height -
-				(ev.value * input_state->screen_height /
-				 input_state->multitouch_state.max_y);
-			if (input_state->multitouch_state
-				    .slots[input_state->multitouch_state
-						   .current_slot]
-				    .position_y == translated_y) {
-				break;
+			int translated_y_coord;
+			if (input_state->orientation == SCREEN_ORIENTATION_LANDSCAPE) {
+				/* Landscape: ABS_MT_POSITION_Y maps to screen Y (inverted) */
+				translated_y_coord =
+					input_state->screen_height -
+					(ev.value * input_state->screen_height /
+					 input_state->multitouch_state.max_y);
+			} else {
+				/* Portrait: ABS_MT_POSITION_Y maps to screen X */
+				translated_y_coord =
+					(ev.value * input_state->screen_width /
+					 input_state->multitouch_state.max_y);
 			}
 
-			input_state->multitouch_state
-				.slots[input_state->multitouch_state
-					       .current_slot]
-				.position_y = translated_y;
+			if (input_state->orientation == SCREEN_ORIENTATION_LANDSCAPE) {
+				if (input_state->multitouch_state
+					    .slots[input_state->multitouch_state
+							   .current_slot]
+					    .position_y == translated_y_coord) {
+					break;
+				}
+				input_state->multitouch_state
+					.slots[input_state->multitouch_state
+						       .current_slot]
+					.position_y = translated_y_coord;
+			} else {
+				if (input_state->multitouch_state
+					    .slots[input_state->multitouch_state
+							   .current_slot]
+					    .position_x == translated_y_coord) {
+					break;
+				}
+				input_state->multitouch_state
+					.slots[input_state->multitouch_state
+						       .current_slot]
+					.position_x = translated_y_coord;
+			}
 			input_state->multitouch_state
 				.slots[input_state->multitouch_state
 					       .current_slot]
@@ -648,9 +716,10 @@ int input_initialize(input_state_t *input_state, nsfb_t *nsfb)
 	// initialize ringbuffer for events
 	ring_buf_init(&input_state->events_buf, 50, sizeof(nsfb_event_t));
 
-	// set width/height (assume these are unchanging for now)
+	// set width/height and orientation (assume these are unchanging for now)
 	input_state->screen_height = nsfb->height;
 	input_state->screen_width = nsfb->width;
+	input_state->orientation = SCREEN_ORIENTATION_PORTRAIT; // will be set by remarkable.c
 
 	poll_sleep.tv_nsec = 10000000;
 	poll_sleep.tv_sec = 0;

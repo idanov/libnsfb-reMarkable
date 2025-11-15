@@ -37,6 +37,12 @@ struct nsfb_s {
 
     nsfb_bbox_t clip; /**< current clipping rectangle for plotters */
     struct nsfb_plotter_fns_s *plotter_fns; /**< Plotter methods */
+    
+    /* Orientation support for reMarkable */
+    int orientation; /**< 0=portrait, 1=landscape */
+    int phys_width; /**< Physical framebuffer width */
+    int phys_height; /**< Physical framebuffer height */
+    int phys_linelen; /**< Physical framebuffer line length */
 };
 
 

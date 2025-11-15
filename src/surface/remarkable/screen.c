@@ -92,7 +92,7 @@ int fb_update_region(fb_state_t *fb_state, nsfb_bbox_t *box)
 	return 0;
 }
 
-int fb_initialize(fb_state_t *fb_state)
+int fb_initialize(fb_state_t *fb_state, screen_orientation_t orientation)
 {
 	int fb = open(FRAMEBUFFER_FILE, O_RDWR);
 	if (fb == -1) {
@@ -112,13 +112,33 @@ int fb_initialize(fb_state_t *fb_state)
 		ERROR_LOG("fb_initialize: could not FBIOGET_VSCREENFINO");
 		return -1;
 	}
-	fb_state->scrinfo.width = v_screen_info.xres;
-	fb_state->scrinfo.height = v_screen_info.yres;
+	
+	fb_state->orientation = orientation;
+	
+	/* Store the physical framebuffer dimensions */
+	int physical_width = v_screen_info.xres;
+	int physical_height = v_screen_info.yres;
+	
+	/* Apply orientation - swap width/height for landscape mode */
+	if (orientation == SCREEN_ORIENTATION_LANDSCAPE) {
+		fb_state->scrinfo.width = physical_height;
+		fb_state->scrinfo.height = physical_width;
+		DEBUG_LOG("fb_initialize: Landscape mode - swapped dimensions");
+	} else {
+		fb_state->scrinfo.width = physical_width;
+		fb_state->scrinfo.height = physical_height;
+		DEBUG_LOG("fb_initialize: Portrait mode - native dimensions");
+	}
+	
+	/* Line length stays at physical value for memory layout */
 	fb_state->scrinfo.linelen = f_screen_info.line_length;
 	fb_state->scrinfo.bpp = v_screen_info.bits_per_pixel;
 	fb_state->fb_size = v_screen_info.yres_virtual *
 			    f_screen_info.line_length;
-	DEBUG_LOG("fb_initialize: Screeninfo loaded");
+	DEBUG_LOG("fb_initialize: Screeninfo loaded: width=%d, height=%d, orientation=%s",
+		  fb_state->scrinfo.width,
+		  fb_state->scrinfo.height,
+		  orientation == SCREEN_ORIENTATION_LANDSCAPE ? "landscape" : "portrait");
 
 	void *mmap_result = mmap(NULL,
 				 fb_state->fb_size,

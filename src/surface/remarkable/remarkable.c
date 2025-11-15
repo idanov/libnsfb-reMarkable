@@ -12,6 +12,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <string.h>
 
 #include "libnsfb.h"
 #include "libnsfb_plot.h"
@@ -32,12 +33,33 @@ fb_state_t fb_state;
 
 static int rm_defaults(nsfb_t *nsfb)
 {
-	if (fb_initialize(&fb_state) != 0) {
+	screen_orientation_t orientation = SCREEN_ORIENTATION_PORTRAIT;
+	const char *orientation_env = getenv("NETSURF_FB_ORIENTATION");
+	
+	if (orientation_env != NULL) {
+		if (strcmp(orientation_env, "landscape") == 0) {
+			orientation = SCREEN_ORIENTATION_LANDSCAPE;
+			DEBUG_LOG("rm_defaults: Using landscape orientation");
+		} else {
+			DEBUG_LOG("rm_defaults: Using portrait orientation");
+		}
+	} else {
+		DEBUG_LOG("rm_defaults: No orientation specified, defaulting to portrait");
+	}
+	
+	if (fb_initialize(&fb_state, orientation) != 0) {
 		ERROR_LOG(
 			"rm_defaults: could not successfully initialize framebuffer. Exiting.");
 		exit(1);
 	}
 
+	/* Store physical framebuffer dimensions (always portrait layout) */
+	nsfb->phys_width = 1404;
+	nsfb->phys_height = 1872;
+	nsfb->phys_linelen = fb_state.scrinfo.linelen;
+	nsfb->orientation = (orientation == SCREEN_ORIENTATION_LANDSCAPE) ? 1 : 0;
+	
+	/* Set logical dimensions based on orientation */
 	nsfb->width = fb_state.scrinfo.width;
 	nsfb->height = fb_state.scrinfo.height;
 	nsfb->bpp = fb_state.scrinfo.bpp;
@@ -64,6 +86,12 @@ static int rm_initialise(nsfb_t *nsfb)
 			"rm_initialize: could not initialize input devices. Exiting");
 		exit(1);
 	}
+	
+	/* Set the orientation in input_state to match fb_state */
+	input_state.orientation = fb_state.orientation;
+	DEBUG_LOG("rm_initialise: Set input orientation to %s",
+		  input_state.orientation == SCREEN_ORIENTATION_LANDSCAPE ? "landscape" : "portrait");
+	
 	nsfb->ptr = fb_state.mapped_fb;
 
 	return 0;
