@@ -43,11 +43,19 @@ line(nsfb_t *nsfb, int linec, nsfb_bbox_t *line, nsfb_plot_pen_t *pen)
                                 continue;
                         }
 
-                        pvideo = get_xy_loc(nsfb, line->x0, line->y0);
-
-                        w = line->x1 - line->x0;
-                        while (w-- > 0)
-                                *(pvideo + w) = ent;
+                        /* In landscape mode, use get_xy_loc for each pixel */
+                        if (nsfb->orientation == 1) {
+                                int x;
+                                for (x = line->x0; x < line->x1; x++) {
+                                        pvideo = get_xy_loc(nsfb, x, line->y0);
+                                        *pvideo = ent;
+                                }
+                        } else {
+                                pvideo = get_xy_loc(nsfb, line->x0, line->y0);
+                                w = line->x1 - line->x0;
+                                while (w-- > 0)
+                                        *(pvideo + w) = ent;
+                        }
 
                 } else {
                         /* standard bresenham line */
@@ -78,26 +86,56 @@ line(nsfb_t *nsfb, int linec, nsfb_bbox_t *line, nsfb_plot_pen_t *pen)
 
                         if (dxabs >= dyabs) {
                                 /* the line is more horizontal than vertical */
-                                for (i = 0; i < dxabs; i++) {
-                                        *pvideo = ent;
-
-                                        pvideo++;
-                                        y += dyabs;
-                                        if (y >= dxabs) {
-                                                y -= dxabs;
-                                                pvideo += sdy * PLOT_LINELEN(nsfb->linelen);
+                                if (nsfb->orientation == 1) {
+                                        /* Landscape: use coordinates directly */
+                                        int cx = (dx >= 0) ? line->x0 : line->x1;
+                                        int cy = line->y0;
+                                        for (i = 0; i < dxabs; i++) {
+                                                pvideo = get_xy_loc(nsfb, cx, cy);
+                                                *pvideo = ent;
+                                                cx++;
+                                                y += dyabs;
+                                                if (y >= dxabs) {
+                                                        y -= dxabs;
+                                                        cy += sdy * SIGN(dx);
+                                                }
+                                        }
+                                } else {
+                                        for (i = 0; i < dxabs; i++) {
+                                                *pvideo = ent;
+                                                pvideo++;
+                                                y += dyabs;
+                                                if (y >= dxabs) {
+                                                        y -= dxabs;
+                                                        pvideo += sdy * PLOT_LINELEN(nsfb->linelen);
+                                                }
                                         }
                                 }
                         } else {
                                 /* the line is more vertical than horizontal */
-                                for (i = 0; i < dyabs; i++) {
-                                        *pvideo = ent;
-                                        pvideo += sdy * PLOT_LINELEN(nsfb->linelen);
-
-                                        x += dxabs;
-                                        if (x >= dyabs) {
-                                                x -= dyabs;
-                                                pvideo++;
+                                if (nsfb->orientation == 1) {
+                                        /* Landscape: use coordinates directly */
+                                        int cx = (dx >= 0) ? line->x0 : line->x1;
+                                        int cy = line->y0;
+                                        for (i = 0; i < dyabs; i++) {
+                                                pvideo = get_xy_loc(nsfb, cx, cy);
+                                                *pvideo = ent;
+                                                cy += sdy * SIGN(dx);
+                                                x += dxabs;
+                                                if (x >= dyabs) {
+                                                        x -= dyabs;
+                                                        cx++;
+                                                }
+                                        }
+                                } else {
+                                        for (i = 0; i < dyabs; i++) {
+                                                *pvideo = ent;
+                                                pvideo += sdy * PLOT_LINELEN(nsfb->linelen);
+                                                x += dxabs;
+                                                if (x >= dyabs) {
+                                                        x -= dyabs;
+                                                        pvideo++;
+                                                }
                                         }
                                 }
                         }
@@ -164,18 +202,34 @@ glyph1(nsfb_t *nsfb,
 
         pitch >>= 3; /* bits to bytes */
 
-        pvideo = get_xy_loc(nsfb, x, loc->y0);
-        pvideo_limit = pvideo + line_len * (height - yoff);
-        row = pixel + yoff * pitch;
-
-        for (; pvideo < pvideo_limit; pvideo += line_len) {
-                for (xloop = xoff; xloop < width; xloop++) {
-
-                        if (row[xloop / 8] & ((1<<7) >> (xloop % 8))) {
-                                *(pvideo + xloop) = fgcol;
+        if (nsfb->orientation == 1) {
+                /* Landscape: use coordinates directly */
+                int cy, cx;
+                row = pixel + yoff * pitch;
+                for (cy = loc->y0; cy < loc->y0 + height - yoff; cy++) {
+                        for (cx = x; cx < x + width - xoff; cx++) {
+                                xloop = cx - x + xoff;
+                                if (row[xloop / 8] & ((1<<7) >> (xloop % 8))) {
+                                        pvideo = get_xy_loc(nsfb, cx, cy);
+                                        *pvideo = fgcol;
+                                }
                         }
+                        row += pitch;
                 }
-                row += pitch;
+        } else {
+                pvideo = get_xy_loc(nsfb, x, loc->y0);
+                pvideo_limit = pvideo + line_len * (height - yoff);
+                row = pixel + yoff * pitch;
+
+                for (; pvideo < pvideo_limit; pvideo += line_len) {
+                        for (xloop = xoff; xloop < width; xloop++) {
+
+                                if (row[xloop / 8] & ((1<<7) >> (xloop % 8))) {
+                                        *(pvideo + xloop) = fgcol;
+                                }
+                        }
+                        row += pitch;
+                }
         }
 
         return true;
@@ -207,24 +261,44 @@ glyph8(nsfb_t *nsfb,
         xoff = loc->x0 - x;
         yoff = loc->y0 - y;
 
-        pvideo = get_xy_loc(nsfb, loc->x0, loc->y0);
-
         fgcol = c & 0xFFFFFF;
 
-        for (yloop = 0; yloop < height; yloop++) {
-                for (xloop = 0; xloop < width; xloop++) {
-                        abpixel = ((unsigned)pixel[((yoff + yloop) * pitch) + xloop + xoff] << 24) | fgcol;
-                        if ((abpixel & 0xFF000000) != 0) {
-                                /* pixel is not transparent */
-                                if ((abpixel & 0xFF000000) != 0xFF000000) {
-                                        abpixel = nsfb_plot_ablend(abpixel,
-                                                                   pixel_to_colour(nsfb, *(pvideo + xloop)));
+        if (nsfb->orientation == 1) {
+                /* Landscape: use coordinates directly */
+                int cy, cx;
+                for (yloop = 0; yloop < height; yloop++) {
+                        cy = loc->y0 + yloop;
+                        for (xloop = 0; xloop < width; xloop++) {
+                                cx = loc->x0 + xloop;
+                                abpixel = ((unsigned)pixel[((yoff + yloop) * pitch) + xloop + xoff] << 24) | fgcol;
+                                if ((abpixel & 0xFF000000) != 0) {
+                                        /* pixel is not transparent */
+                                        pvideo = get_xy_loc(nsfb, cx, cy);
+                                        if ((abpixel & 0xFF000000) != 0xFF000000) {
+                                                abpixel = nsfb_plot_ablend(abpixel,
+                                                                           pixel_to_colour(nsfb, *pvideo));
+                                        }
+                                        *pvideo = colour_to_pixel(nsfb, abpixel);
                                 }
-
-                                *(pvideo + xloop) = colour_to_pixel(nsfb, abpixel);
                         }
                 }
-                pvideo += PLOT_LINELEN(nsfb->linelen);
+        } else {
+                pvideo = get_xy_loc(nsfb, loc->x0, loc->y0);
+                for (yloop = 0; yloop < height; yloop++) {
+                        for (xloop = 0; xloop < width; xloop++) {
+                                abpixel = ((unsigned)pixel[((yoff + yloop) * pitch) + xloop + xoff] << 24) | fgcol;
+                                if ((abpixel & 0xFF000000) != 0) {
+                                        /* pixel is not transparent */
+                                        if ((abpixel & 0xFF000000) != 0xFF000000) {
+                                                abpixel = nsfb_plot_ablend(abpixel,
+                                                                           pixel_to_colour(nsfb, *(pvideo + xloop)));
+                                        }
+
+                                        *(pvideo + xloop) = colour_to_pixel(nsfb, abpixel);
+                                }
+                        }
+                        pvideo += PLOT_LINELEN(nsfb->linelen);
+                }
         }
 
         return true;
@@ -303,84 +377,161 @@ static bool bitmap_scaled(nsfb_t *nsfb, const nsfb_bbox_t *loc,
 		ry = 0;
 	}
 
-	/* plot the image */
-	pvideo = get_xy_loc(nsfb, clipped.x0, clipped.y0);
-	pvideo_limit = pvideo + PLOT_LINELEN(nsfb->linelen) * rheight;
-	if (alpha) {
-		for (; pvideo < pvideo_limit;
-				pvideo += PLOT_LINELEN(nsfb->linelen)) {
-			/* looping through render area vertically */
-			xoff = xoffs;
-			rx = rxs;
-			for (xloop = 0; xloop < rwidth; xloop++) {
-				/* looping through render area horizontally */
-				/* get value of source pixel in question */
-				abpixel = pixel[yoff + xoff];
-				if ((abpixel & 0xFF000000) != 0) {
-					/* pixel is not transparent; have to
-					 * plot something */
-					if ((abpixel & 0xFF000000) !=
-							0xFF000000) {
-						/* pixel is not opaque; need to
-						 * blend */
-						abpixel = nsfb_plot_ablend(
-								abpixel,
-								pixel_to_colour(
-								nsfb, 
-								*(pvideo +
-								xloop)));
-					}
-					/* plot pixel */
-					*(pvideo + xloop) = colour_to_pixel(
-							nsfb, abpixel);
-				}
-				/* handle horizontal interpolation */
-				xoff += dx;
-				rx += dxr;
-				if (rx >= width) {
-					xoff++;
-					rx -= width;
-				}
-			}
-			/* handle vertical interpolation */
-			yoff += dy;
-			ry += dyr;
-			if (ry >= height) {
-				yoff += bmp_stride;
-				ry -= height;
-			}
-		}
-	} else {
-		for (; pvideo < pvideo_limit;
-				pvideo += PLOT_LINELEN(nsfb->linelen)) {
-			/* looping through render area vertically */
-			xoff = xoffs;
-			rx = rxs;
-			for (xloop = 0; xloop < rwidth; xloop++) {
-				/* looping through render area horizontally */
-				/* get value of source pixel in question */
-				abpixel = pixel[yoff + xoff];
-				/* plot pixel */
-				*(pvideo + xloop) = colour_to_pixel(
-						nsfb, abpixel);
+	        /* plot the image */
+	        if (nsfb->orientation == 1) {
+	                /* Landscape: use coordinates directly */
+	                int cy, cx;
+	                if (alpha) {
+	                        for (cy = clipped.y0; cy < clipped.y0 + rheight; cy++) {
+	                                /* looping through render area vertically */
+	                                xoff = xoffs;
+	                                rx = rxs;
+	                                for (cx = clipped.x0; cx < clipped.x0 + rwidth; cx++) {
+	                                        /* looping through render area horizontally */
+	                                        /* get value of source pixel in question */
+	                                        abpixel = pixel[yoff + xoff];
+	                                        if ((abpixel & 0xFF000000) != 0) {
+	                                                /* pixel is not transparent; have to plot something */
+	                                                pvideo = get_xy_loc(nsfb, cx, cy);
+	                                                if ((abpixel & 0xFF000000) != 0xFF000000) {
+	                                                        /* pixel is not opaque; need to blend */
+	                                                        abpixel = nsfb_plot_ablend(abpixel,
+	                                                                                   pixel_to_colour(nsfb, *pvideo));
+	                                                }
+	                                                /* plot pixel */
+	                                                *pvideo = colour_to_pixel(nsfb, abpixel);
+	                                        }
+	                                        /* handle horizontal interpolation */
+	                                        xoff += dx;
+	                                        rx += dxr;
+	                                        if (rx >= 65536) {
+	                                                rx -= 65536;
+	                                                xoff++;
+	                                        }
+	                                }
 
-				/* handle horizontal interpolation */
-				xoff += dx;
-				rx += dxr;
-				if (rx >= width) {
-					xoff++;
-					rx -= width;
-				}
-			}
-			/* handle vertical interpolation */
-			yoff += dy;
-			ry += dyr;
-			if (ry >= height) {
-				yoff += bmp_stride;
-				ry -= height;
-			}
-		}
-	}
+	                                /* handle vertical interpolation */
+	                                yoff += dy;
+	                                ry += dyr;
+	                                if (ry >= 65536) {
+	                                        ry -= 65536;
+	                                        yoff += bmp_width;
+	                                }
+	                        }
+	                } else {
+	                        for (cy = clipped.y0; cy < clipped.y0 + rheight; cy++) {
+	                                /* looping through render area vertically */
+	                                xoff = xoffs;
+	                                rx = rxs;
+	                                for (cx = clipped.x0; cx < clipped.x0 + rwidth; cx++) {
+	                                        /* looping through render area horizontally */
+	                                        /* get value of source pixel in question */
+	                                        abpixel = pixel[yoff + xoff];
+	                                        /* plot pixel */
+	                                        pvideo = get_xy_loc(nsfb, cx, cy);
+	                                        *pvideo = colour_to_pixel(nsfb, abpixel);
+
+	                                        /* handle horizontal interpolation */
+	                                        xoff += dx;
+	                                        rx += dxr;
+	                                        if (rx >= 65536) {
+	                                                rx -= 65536;
+	                                                xoff++;
+	                                        }
+	                                }
+
+	                                /* handle vertical interpolation */
+	                                yoff += dy;
+	                                ry += dyr;
+	                                if (ry >= 65536) {
+	                                        ry -= 65536;
+	                                        yoff += bmp_width;
+	                                }
+	                        }
+	                }
+	        } else {
+	                pvideo = get_xy_loc(nsfb, clipped.x0, clipped.y0);
+	                pvideo_limit = pvideo + PLOT_LINELEN(nsfb->linelen) * rheight;
+	                if (alpha) {
+	                        for (; pvideo < pvideo_limit;
+	                                        pvideo += PLOT_LINELEN(nsfb->linelen)) {
+	                                /* looping through render area vertically */
+	                                xoff = xoffs;
+	                                rx = rxs;
+	                                for (xloop = 0; xloop < rwidth; xloop++) {
+	                                        /* looping through render area horizontally */
+	                                        /* get value of source pixel in question */
+	                                        abpixel = pixel[yoff + xoff];
+	                                        if ((abpixel & 0xFF000000) != 0) {
+	                                                /* pixel is not transparent; have to
+	                                                 * plot something */
+	                                                if ((abpixel & 0xFF000000) !=
+	                                                                0xFF000000) {
+	                                                        /* pixel is not opaque; need to
+	                                                         * blend */
+	                                                        abpixel = nsfb_plot_ablend(
+	                                                                        abpixel,
+	                                                                        pixel_to_colour(
+	                                                                        nsfb, 
+	                                                                        *(pvideo +
+	                                                                        xloop)));
+	                                                }
+	                                                /* plot pixel */
+	                                                *(pvideo + xloop) = colour_to_pixel(
+	                                                                nsfb, abpixel);
+	                                        }
+	                                        /* handle horizontal interpolation */
+	                                        xoff += dx;
+	                                        rx += dxr;
+	                                        if (rx >= 65536) {
+	                                                rx -= 65536;
+	                                                xoff++;
+	                                        }
+	                                }
+
+	                                /* handle vertical interpolation */
+	                                yoff += dy;
+	                                ry += dyr;
+	                                if (ry >= 65536) {
+	                                        ry -= 65536;
+	                                        yoff += bmp_width;
+	                                }
+
+	                        }
+	                } else {
+	                        for (; pvideo < pvideo_limit;
+	                                        pvideo += PLOT_LINELEN(nsfb->linelen)) {
+	                                /* looping through render area vertically */
+	                                xoff = xoffs;
+	                                rx = rxs;
+	                                for (xloop = 0; xloop < rwidth; xloop++) {
+	                                        /* looping through render area horizontally */
+	                                        /* get value of source pixel in question */
+	                                        abpixel = pixel[yoff + xoff];
+	                                        /* plot pixel */
+	                                        *(pvideo + xloop) = colour_to_pixel(
+	                                                        nsfb, abpixel);
+
+	                                        /* handle horizontal interpolation */
+	                                        xoff += dx;
+	                                        rx += dxr;
+	                                        if (rx >= 65536) {
+	                                                rx -= 65536;
+	                                                xoff++;
+	                                        }
+
+	                                }
+
+	                                /* handle vertical interpolation */
+	                                yoff += dy;
+	                                ry += dyr;
+	                                if (ry >= 65536) {
+	                                        ry -= 65536;
+	                                        yoff += bmp_width;
+	                                }
+	                        }
+	                }
+	        }
 
 	if (set_dither) {
 		nsfb_palette_dither_fini(nsfb->palette);
@@ -445,41 +596,79 @@ bitmap(nsfb_t *nsfb,
         height = height * bmp_stride + yoff;
 
         /* plot the image */
-        pvideo = get_xy_loc(nsfb, clipped.x0, clipped.y0);
-
-        if (alpha) {
-                for (yloop = yoff; yloop < height; yloop += bmp_stride) {
-                        for (xloop = 0; xloop < width; xloop++) {
-                                abpixel = pixel[yloop + xloop + xoff];
-                                if ((abpixel & 0xFF000000) != 0) {
-                                        /* pixel is not transparent; have to
-                                         * plot something */
-                                        if ((abpixel & 0xFF000000) !=
-                                                       0xFF000000) {
-                                                /* pixel is not opaque; need to
-                                                 * blend */
-                                                abpixel = nsfb_plot_ablend(
-                                                                abpixel,
-                                                                pixel_to_colour(
-                                                                nsfb,
-                                                                *(pvideo +
-                                                                xloop)));
+        if (nsfb->orientation == 1) {
+                /* Landscape: use coordinates directly */
+                int cy, cx, out_y;
+                if (alpha) {
+                        out_y = 0;
+                        for (yloop = yoff; yloop < height; yloop += bmp_stride) {
+                                cy = clipped.y0 + out_y;
+                                for (xloop = 0; xloop < width; xloop++) {
+                                        cx = clipped.x0 + xloop;
+                                        abpixel = pixel[yloop + xloop + xoff];
+                                        if ((abpixel & 0xFF000000) != 0) {
+                                                /* pixel is not transparent; have to plot something */
+                                                pvideo = get_xy_loc(nsfb, cx, cy);
+                                                if ((abpixel & 0xFF000000) != 0xFF000000) {
+                                                        /* pixel is not opaque; need to blend */
+                                                        abpixel = nsfb_plot_ablend(abpixel,
+                                                                                   pixel_to_colour(nsfb, *pvideo));
+                                                }
+                                                *pvideo = colour_to_pixel(nsfb, abpixel);
                                         }
+                                }
+                                out_y++;
+                        }
+                } else {
+                        out_y = 0;
+                        for (yloop = yoff; yloop < height; yloop += bmp_stride) {
+                                cy = clipped.y0 + out_y;
+                                for (xloop = 0; xloop < width; xloop++) {
+                                        cx = clipped.x0 + xloop;
+                                        abpixel = pixel[yloop + xloop + xoff];
+                                        pvideo = get_xy_loc(nsfb, cx, cy);
+                                        *pvideo = colour_to_pixel(nsfb, abpixel);
+                                }
+                                out_y++;
+                        }
+                }
+        } else {
+                pvideo = get_xy_loc(nsfb, clipped.x0, clipped.y0);
 
+                if (alpha) {
+                        for (yloop = yoff; yloop < height; yloop += bmp_stride) {
+                                for (xloop = 0; xloop < width; xloop++) {
+                                        abpixel = pixel[yloop + xloop + xoff];
+                                        if ((abpixel & 0xFF000000) != 0) {
+                                                /* pixel is not transparent; have to
+                                                 * plot something */
+                                                if ((abpixel & 0xFF000000) !=
+                                                                0xFF000000) {
+                                                        /* pixel is not opaque; need to
+                                                         * blend */
+                                                        abpixel = nsfb_plot_ablend(
+                                                                        abpixel,
+                                                                        pixel_to_colour(
+                                                                        nsfb,
+                                                                        *(pvideo +
+                                                                        xloop)));
+                                                }
+
+                                                *(pvideo + xloop) = colour_to_pixel(
+                                                                nsfb, abpixel);
+                                        }
+                                }
+                                pvideo += PLOT_LINELEN(nsfb->linelen);
+                        }
+                } else {
+                        for (yloop = yoff; yloop < height; yloop += bmp_stride) {
+                                for (xloop = 0; xloop < width; xloop++) {
+                                        abpixel = pixel[yloop + xloop + xoff];
                                         *(pvideo + xloop) = colour_to_pixel(
                                                         nsfb, abpixel);
                                 }
+                                pvideo += PLOT_LINELEN(nsfb->linelen);
                         }
-                        pvideo += PLOT_LINELEN(nsfb->linelen);
-                }
-        } else {
-                for (yloop = yoff; yloop < height; yloop += bmp_stride) {
-                        for (xloop = 0; xloop < width; xloop++) {
-                                abpixel = pixel[yloop + xloop + xoff];
-                                *(pvideo + xloop) = colour_to_pixel(
-                                                nsfb, abpixel);
-                        }
-                        pvideo += PLOT_LINELEN(nsfb->linelen);
                 }
         }
 
@@ -536,120 +725,221 @@ bitmap_tiles_x(nsfb_t *nsfb,
 	yoff = (clipped.y0 - y) * bmp_stride;
 
 	/* plot the image */
-	if (alpha) {
-		for (; pvideo < pvideo_limit;
-				pvideo += PLOT_LINELEN(nsfb->linelen)) {
-			pvideo_pos = pvideo;
-			for (t = 0; t < 1; t++) {
+	if (nsfb->orientation == 1) {
+		/* Landscape: use coordinates directly */
+		int cy, output_x;
+		int src_row_offset;
+		
+		if (alpha) {
+			for (cy = clipped.y0; cy < clipped.y1; cy++) {
+				output_x = clipped.x0;
+				/* Calculate source row for this output row */
+				src_row_offset = (cy - y) * bmp_stride;
+				
+				/* First tile */
 				for (xloop = xoff; xloop < width; xloop++) {
-					abpixel = pixel[yoff + xloop];
+					if (output_x >= clipped.x1) break;
+					abpixel = pixel[src_row_offset + xloop];
 					if ((abpixel & 0xFF000000) != 0) {
-						/* pixel is not transparent;
-						 * have to plot something */
-						if ((abpixel & 0xFF000000) !=
-								0xFF000000) {
-							/* pixel is not opaque;
-							 * need to blend */
-							abpixel =
-							nsfb_plot_ablend(
-								abpixel,
-								pixel_to_colour(
-								nsfb,
-								*(pvideo +
-								xloop - xoff)));
+						pvideo = get_xy_loc(nsfb, output_x, cy);
+						if ((abpixel & 0xFF000000) != 0xFF000000) {
+							abpixel = nsfb_plot_ablend(abpixel,
+								pixel_to_colour(nsfb, *pvideo));
 						}
-						*(pvideo + xloop - xoff) =
-								colour_to_pixel(
-								nsfb, abpixel);
+						*pvideo = colour_to_pixel(nsfb, abpixel);
+					}
+					output_x++;
+				}
+				
+				/* Middle tiles */
+				for (t = 1; t < tiles_x - 1; t++) {
+					for (xloop = 0; xloop < width; xloop++) {
+						if (output_x >= clipped.x1) break;
+						abpixel = pixel[src_row_offset + xloop];
+						if ((abpixel & 0xFF000000) != 0) {
+							pvideo = get_xy_loc(nsfb, output_x, cy);
+							if ((abpixel & 0xFF000000) != 0xFF000000) {
+								abpixel = nsfb_plot_ablend(abpixel,
+									pixel_to_colour(nsfb, *pvideo));
+							}
+							*pvideo = colour_to_pixel(nsfb, abpixel);
+						}
+						output_x++;
+					}
+				}
+				
+				/* Last tile */
+				for (t = tiles_x - 1; t < tiles_x; t++) {
+					for (xloop = 0; xloop < xlim; xloop++) {
+						if (output_x >= clipped.x1) break;
+						abpixel = pixel[src_row_offset + xloop];
+						if ((abpixel & 0xFF000000) != 0) {
+							pvideo = get_xy_loc(nsfb, output_x, cy);
+							if ((abpixel & 0xFF000000) != 0xFF000000) {
+								abpixel = nsfb_plot_ablend(abpixel,
+									pixel_to_colour(nsfb, *pvideo));
+							}
+							*pvideo = colour_to_pixel(nsfb, abpixel);
+						}
+						output_x++;
 					}
 				}
 			}
-			pvideo_pos += width - xoff;
-			for (; t < tiles_x - 1; t++) {
-				for (xloop = 0; xloop < width; xloop++) {
-					abpixel = pixel[yoff + xloop];
-					if ((abpixel & 0xFF000000) != 0) {
-						/* pixel is not transparent;
-						 * have to plot something */
-						if ((abpixel & 0xFF000000) !=
-								0xFF000000) {
-							/* pixel is not opaque;
-							 * need to blend */
-							abpixel =
-							nsfb_plot_ablend(
-								abpixel,
-								pixel_to_colour(
-								nsfb,
-								*(pvideo_pos +
-								xloop)));
-						}
-						*(pvideo_pos + xloop) =
-								colour_to_pixel(
-								nsfb, abpixel);
+		} else {
+			for (cy = clipped.y0; cy < clipped.y1; cy++) {
+				output_x = clipped.x0;
+				/* Calculate source row for this output row */
+				src_row_offset = (cy - y) * bmp_stride;
+				
+				/* First tile */
+				for (xloop = xoff; xloop < width; xloop++) {
+					if (output_x >= clipped.x1) break;
+					abpixel = pixel[src_row_offset + xloop];
+					pvideo = get_xy_loc(nsfb, output_x, cy);
+					*pvideo = colour_to_pixel(nsfb, abpixel);
+					output_x++;
+				}
+				
+				/* Middle tiles */
+				for (t = 1; t < tiles_x - 1; t++) {
+					for (xloop = 0; xloop < width; xloop++) {
+						if (output_x >= clipped.x1) break;
+						abpixel = pixel[src_row_offset + xloop];
+						pvideo = get_xy_loc(nsfb, output_x, cy);
+						*pvideo = colour_to_pixel(nsfb, abpixel);
+						output_x++;
 					}
 				}
-				pvideo_pos += width;
-			}
-			for (; t < tiles_x; t++) {
-				for (xloop = 0; xloop < xlim; xloop++) {
-					abpixel = pixel[yoff + xloop];
-					if ((abpixel & 0xFF000000) != 0) {
-						/* pixel is not transparent;
-						 * have to plot something */
-						if ((abpixel & 0xFF000000) !=
-								0xFF000000) {
-							/* pixel is not opaque;
-							 * need to blend */
-							abpixel =
-							nsfb_plot_ablend(
-								abpixel,
-								pixel_to_colour(
-								nsfb,
-								*(pvideo_pos +
-								xloop)));
-						}
-						*(pvideo_pos + xloop) =
-								colour_to_pixel(
-								nsfb, abpixel);
+				
+				/* Last tile */
+				for (t = tiles_x - 1; t < tiles_x; t++) {
+					for (xloop = 0; xloop < xlim; xloop++) {
+						if (output_x >= clipped.x1) break;
+						abpixel = pixel[src_row_offset + xloop];
+						pvideo = get_xy_loc(nsfb, output_x, cy);
+						*pvideo = colour_to_pixel(nsfb, abpixel);
+						output_x++;
 					}
 				}
 			}
-			yoff += bmp_stride;
 		}
 	} else {
-		for (; pvideo < pvideo_limit;
-				pvideo += PLOT_LINELEN(nsfb->linelen)) {
-			pvideo_pos = pvideo;
-			for (t = 0; t < 1; t++) {
-				for (xloop = xoff; xloop < width; xloop++) {
-					abpixel = pixel[yoff + xloop];
-					*(pvideo + xloop - xoff) =
-							colour_to_pixel(
-								nsfb,
-								abpixel);
+		/* Portrait: original optimized pointer arithmetic */
+		if (alpha) {
+			for (; pvideo < pvideo_limit;
+					pvideo += PLOT_LINELEN(nsfb->linelen)) {
+				pvideo_pos = pvideo;
+				for (t = 0; t < 1; t++) {
+					for (xloop = xoff; xloop < width; xloop++) {
+						abpixel = pixel[yoff + xloop];
+						if ((abpixel & 0xFF000000) != 0) {
+							/* pixel is not transparent;
+							 * have to plot something */
+							if ((abpixel & 0xFF000000) !=
+									0xFF000000) {
+								/* pixel is not opaque;
+								 * need to blend */
+								abpixel =
+								nsfb_plot_ablend(
+									abpixel,
+									pixel_to_colour(
+									nsfb,
+									*(pvideo +
+									xloop - xoff)));
+							}
+							*(pvideo + xloop - xoff) =
+									colour_to_pixel(
+									nsfb, abpixel);
+						}
+					}
 				}
-			}
-			pvideo_pos += width - xoff;
-			for (; t < tiles_x - 1; t++) {
-				for (xloop = 0; xloop < width; xloop++) {
-					abpixel = pixel[yoff + xloop];
-					*(pvideo_pos + xloop) =
-							colour_to_pixel(
-								nsfb,
-								abpixel);
+				pvideo_pos += width - xoff;
+				for (; t < tiles_x - 1; t++) {
+					for (xloop = 0; xloop < width; xloop++) {
+						abpixel = pixel[yoff + xloop];
+						if ((abpixel & 0xFF000000) != 0) {
+							/* pixel is not transparent;
+							 * have to plot something */
+							if ((abpixel & 0xFF000000) !=
+									0xFF000000) {
+								/* pixel is not opaque;
+								 * need to blend */
+								abpixel =
+								nsfb_plot_ablend(
+									abpixel,
+									pixel_to_colour(
+									nsfb,
+									*(pvideo_pos +
+									xloop)));
+							}
+							*(pvideo_pos + xloop) =
+									colour_to_pixel(
+									nsfb, abpixel);
+						}
+					}
+					pvideo_pos += width;
 				}
-				pvideo_pos += width;
-			}
-			for (; t < tiles_x; t++) {
-				for (xloop = 0; xloop < xlim; xloop++) {
-					abpixel = pixel[yoff + xloop];
-					*(pvideo_pos + xloop) =
-							colour_to_pixel(
-								nsfb,
-								abpixel);
+				for (; t < tiles_x; t++) {
+					for (xloop = 0; xloop < xlim; xloop++) {
+						abpixel = pixel[yoff + xloop];
+						if ((abpixel & 0xFF000000) != 0) {
+							/* pixel is not transparent;
+							 * have to plot something */
+							if ((abpixel & 0xFF000000) !=
+									0xFF000000) {
+								/* pixel is not opaque;
+								 * need to blend */
+								abpixel =
+								nsfb_plot_ablend(
+									abpixel,
+									pixel_to_colour(
+									nsfb,
+									*(pvideo_pos +
+									xloop)));
+							}
+							*(pvideo_pos + xloop) =
+									colour_to_pixel(
+									nsfb, abpixel);
+						}
+					}
 				}
+				yoff += bmp_stride;
 			}
-			yoff += bmp_stride;
+		} else {
+			for (; pvideo < pvideo_limit;
+					pvideo += PLOT_LINELEN(nsfb->linelen)) {
+				pvideo_pos = pvideo;
+				for (t = 0; t < 1; t++) {
+					for (xloop = xoff; xloop < width; xloop++) {
+						abpixel = pixel[yoff + xloop];
+						*(pvideo + xloop - xoff) =
+								colour_to_pixel(
+									nsfb,
+									abpixel);
+					}
+				}
+				pvideo_pos += width - xoff;
+				for (; t < tiles_x - 1; t++) {
+					for (xloop = 0; xloop < width; xloop++) {
+						abpixel = pixel[yoff + xloop];
+						*(pvideo_pos + xloop) =
+								colour_to_pixel(
+									nsfb,
+									abpixel);
+					}
+					pvideo_pos += width;
+				}
+				for (; t < tiles_x; t++) {
+					for (xloop = 0; xloop < xlim; xloop++) {
+						abpixel = pixel[yoff + xloop];
+						*(pvideo_pos + xloop) =
+								colour_to_pixel(
+									nsfb,
+									abpixel);
+					}
+				}
+				yoff += bmp_stride;
+			}
 		}
 	}
 
@@ -766,21 +1056,37 @@ static bool readrect(nsfb_t *nsfb, nsfb_bbox_t *rect, nsfb_colour_t *buffer)
         PLOT_TYPE *pvideo;
         int xloop, yloop;
         int width;
+        int height;
 
         if (!nsfb_plot_clip_ctx(nsfb, rect)) {
                 return true;
         }
 
         width = rect->x1 - rect->x0;
+        height = rect->y1 - rect->y0;
 
-        pvideo = get_xy_loc(nsfb, rect->x0, rect->y0);
-
-        for (yloop = rect->y0; yloop < rect->y1; yloop += 1) {
-                for (xloop = 0; xloop < width; xloop++) {
-                        *buffer = pixel_to_colour(nsfb, *(pvideo + xloop));
-                        buffer++;
+        if (nsfb->orientation == 1) {
+                /* Landscape: use coordinates directly */
+                int cy, cx;
+                for (yloop = 0; yloop < height; yloop++) {
+                        cy = rect->y0 + yloop;
+                        for (xloop = 0; xloop < width; xloop++) {
+                                cx = rect->x0 + xloop;
+                                pvideo = get_xy_loc(nsfb, cx, cy);
+                                *buffer = pixel_to_colour(nsfb, *pvideo);
+                                buffer++;
+                        }
                 }
-                pvideo += PLOT_LINELEN(nsfb->linelen);
+        } else {
+                pvideo = get_xy_loc(nsfb, rect->x0, rect->y0);
+
+                for (yloop = 0; yloop < height; yloop++) {
+                        for (xloop = 0; xloop < width; xloop++) {
+                                *buffer = pixel_to_colour(nsfb, *(pvideo + xloop));
+                                buffer++;
+                        }
+                        pvideo += PLOT_LINELEN(nsfb->linelen);
+                }
         }
         return true;
 }

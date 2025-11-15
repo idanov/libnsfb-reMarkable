@@ -7,6 +7,7 @@
 
 #include "libnsfb.h"
 #include "ringbuf.h"
+#include "screen.h"
 
 #define EVENTS_DIR "/dev/input"
 
@@ -80,6 +81,7 @@ typedef struct input_state_s {
 
 	int screen_width;
 	int screen_height;
+	screen_orientation_t orientation;
 } input_state_t;
 
 int input_initialize(input_state_t *input_state, nsfb_t *nsfb);

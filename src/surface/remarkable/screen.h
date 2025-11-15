@@ -22,6 +22,11 @@
 
 #define FRAMEBUFFER_FILE "/dev/fb0"
 
+typedef enum {
+	SCREEN_ORIENTATION_PORTRAIT = 0,
+	SCREEN_ORIENTATION_LANDSCAPE = 1
+} screen_orientation_t;
+
 typedef struct fb_info_s {
 	int height;
 	int width;
@@ -35,6 +40,7 @@ typedef struct fb_state_s {
 	void *mapped_fb;
 
 	fb_info_t scrinfo;
+	screen_orientation_t orientation;
 
 	int next_update_x0;
 	int next_update_x1;
@@ -52,7 +58,7 @@ struct update_thread_params_s {
 
 int fb_claim_region(fb_state_t *fb_state, nsfb_bbox_t *box);
 int fb_update_region(fb_state_t *fb_state, nsfb_bbox_t *box);
-int fb_initialize(fb_state_t *fb_state);
+int fb_initialize(fb_state_t *fb_state, screen_orientation_t orientation);
 int fb_finalize(fb_state_t *fb_state);
 
 #endif
